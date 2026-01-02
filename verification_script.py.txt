@@ -1,0 +1,71 @@
+verification_script.py
+
+PROJECT: Institutional Trade Data Validator
+AUTHOR: Brian Penrod, DBA
+DESCRIPTION: 
+Pre-ingestion validation script to ensure data integrity before loading into BigQuery.
+Checks for missing columns, null values, and logical inconsistencies (e.g., negative prices).
+"""
+
+import pandas as pd
+import sys
+import os
+
+# --- CONFIGURATION ---
+# In a real pipeline, this would be an argument or env variable
+FILE_NAME = 'trades_export for sql.csv' 
+REQUIRED_COLUMNS = ['ContractName', 'EnteredAt', 'EntryPrice', 'Size', 'PnL']
+
+def run_validation(file_path):
+    print(f"--- INITIATING DATA VALIDATION PROTOCOL: {file_path} ---")
+    
+    # CHECK 1: File Existence
+    if not os.path.exists(file_path):
+        print(f"[CRITICAL] File not found: {file_path}")
+        return False
+
+    try:
+        df = pd.read_csv(file_path)
+        print(f"[PASS] File loaded. Total Records: {len(df)}")
+    except Exception as e:
+        print(f"[CRITICAL] Failed to read CSV: {e}")
+        return False
+
+    # CHECK 2: Schema Validation (Column check)
+    missing_cols = [col for col in REQUIRED_COLUMNS if col not in df.columns]
+    if missing_cols:
+        print(f"[FAIL] Schema Mismatch! Missing columns: {missing_cols}")
+        return False
+    else:
+        print(f"[PASS] Schema validation successful.")
+
+    # CHECK 3: Null Value Audit
+    null_counts = df[REQUIRED_COLUMNS].isnull().sum()
+    if null_counts.sum() > 0:
+        print(f"[WARN] Data Integrity Risk: Null values detected.")
+        print(null_counts[null_counts > 0])
+        # We don't fail here, but we flag it
+    else:
+        print(f"[PASS] Data Integrity: No null values in critical fields.")
+
+    # CHECK 4: Financial Logic (Prices must be positive)
+    invalid_prices = df[df['EntryPrice'] <= 0]
+    if not invalid_prices.empty:
+        print(f"[FAIL] Logic Error: Found {len(invalid_prices)} trades with Price <= 0.")
+        return False
+    else:
+        print(f"[PASS] Financial Logic: All prices are positive.")
+
+    print("--- VALIDATION COMPLETE: DATA IS CLEAN ---")
+    return True
+
+if __name__ == "__main__":
+    # If the file exists locally, run the check
+    if os.path.exists(FILE_NAME):
+        success = run_validation(FILE_NAME)
+        if success:
+            sys.exit(0) # Success exit code
+        else:
+            sys.exit(1) # Error exit code
+    else:
+        print("Note: CSV file not found in directory. Upload 'sample_data.csv' to run test.")
